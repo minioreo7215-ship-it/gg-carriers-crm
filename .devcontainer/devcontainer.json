@@ -1,0 +1,60 @@
+POST_CREATE_COMMAND=$(cat <<'EOF'
+#!/bin/bash
+echo "🚀 Initializing GG Carriers CRM development environment..."
+
+cd /workspaces/gg-carriers-crm
+
+echo "📦 Installing backend dependencies..."
+cd backend
+npm install
+
+echo "📦 Installing frontend dependencies..."
+cd ../frontend
+npm install
+
+echo ""
+echo "✅ Environment ready!"
+echo ""
+echo "Commands to start:"
+echo "  Backend:  cd backend && npm run dev"
+echo "  Frontend: cd frontend && npm run dev"
+echo ""
+echo "Access at http://localhost:3000"
+EOF
+)
+
+{
+  "name": "GG Carriers CRM",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:18",
+  "features": {
+    "ghcr.io/devcontainers/features/postgresql:1": {
+      "version": "15"
+    }
+  },
+  "postCreateCommand": "$POST_CREATE_COMMAND",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "prisma.prisma",
+        "ms-vscode.vscode-typescript-next",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "forwardPorts": [3000, 5000, 5432, 5555],
+  "portsAttributes": {
+    "3000": {
+      "label": "Frontend",
+      "onAutoForward": "notify"
+    },
+    "5000": {
+      "label": "Backend API",
+      "onAutoForward": "notify"
+    },
+    "5432": {
+      "label": "PostgreSQL",
+      "onAutoForward": "silent"
+    }
+  }
+}
