@@ -1,0 +1,615 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Users & Authentication
+model User {
+  id                String      @id @default(cuid())
+  email             String      @unique
+  name              String
+  password          String?
+  profileImage      String?
+  phone             String?
+  role              UserRole    @default(SALES_EXECUTIVE)
+  department        String?
+  isActive          Boolean     @default(true)
+  emailVerified     Boolean     @default(false)
+  phoneVerified     Boolean     @default(false)
+  lastLogin         DateTime?
+  googleId          String?     @unique
+  
+  // Relations
+  leads             Lead[]      @relation("LeadAssignedTo")
+  meetings          Meeting[]   @relation("MeetingCreatedBy")
+  tasks             Task[]      @relation("TaskAssignedTo")
+  activities        Activity[]  @relation("ActivityCreatedBy")
+  documents         Document[]  @relation("DocumentUploadedBy")
+  quotations        Quotation[] @relation("QuotationCreatedBy")
+  notifications     Notification[] @relation("NotificationFor")
+  auditLogs         AuditLog[]  @relation("AuditLogUser")
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([role])
+  @@index([isActive])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  SALES_MANAGER
+  SALES_EXECUTIVE
+  TELECALLER
+  DATA_ENTRY_OPERATOR
+}
+
+// Companies Master
+model Company {
+  id                    String      @id @default(cuid())
+  name                  String      @unique
+  gst                   String?     @unique
+  industry              String
+  subIndustry           String?
+  industrialArea        String?
+  address               String?
+  city                  String
+  state                 String
+  pincode               String?
+  googleMapsUrl         String?
+  website               String?
+  products              String?
+  employeeSize          Int?
+  annualTurnover        String?
+  leadSource            String?
+  verificationStatus    VerificationStatus @default(UNVERIFIED)
+  
+  // AI Fields
+  aiValidated           Boolean     @default(false)
+  aiScore               Float       @default(0)
+  correctedName         String?
+  industryConfidence    Float       @default(0)
+  
+  // Relations
+  contacts              Contact[]   @relation("CompanyContacts")
+  leads                 Lead[]      @relation("CompanyLeads")
+  meetings              Meeting[]   @relation("CompanyMeetings")
+  documents             Document[]  @relation("CompanyDocuments")
+  quotations            Quotation[] @relation("CompanyQuotations")
+  activities            Activity[]  @relation("CompanyActivities")
+  
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  
+  @@index([city])
+  @@index([state])
+  @@index([industry])
+  @@index([verificationStatus])
+  @@fulltext([name, city, state, industry])
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+  PENDING
+}
+
+// Contacts Master
+model Contact {
+  id                String      @id @default(cuid())
+  companyId         String
+  company           Company     @relation("CompanyContacts", fields: [companyId], references: [id], onDelete: Cascade)
+  
+  name              String
+  designation       String
+  mobileNumber      String
+  whatsappNumber    String?
+  officeNumber      String?
+  email             String?
+  alternateEmail    String?
+  linkedinUrl       String?
+  notes             String?
+  isPrimaryContact  Boolean     @default(false)
+  decisionMaker     Boolean     @default(false)
+  
+  // Relations
+  leads             Lead[]      @relation("ContactLeads")
+  meetings          Meeting[]   @relation("ContactMeetings")
+  activities        Activity[]  @relation("ContactActivities")
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  @@index([companyId])
+  @@index([email])
+  @@index([mobileNumber])
+}
+
+// Leads Management
+model Lead {
+  id                String      @id @default(cuid())
+  companyId         String
+  company           Company     @relation("CompanyLeads", fields: [companyId], references: [id], onDelete: Cascade)
+  
+  contactId         String?
+  contact           Contact?    @relation("ContactLeads", fields: [contactId], references: [id], onDelete: SetNull)
+  
+  assignedToId      String?
+  assignedTo        User?       @relation("LeadAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  
+  status            LeadStatus  @default(NEW_LEAD)
+  source            String      @default("MANUAL")
+  temperature       Temperature @default(COLD)
+  
+  // AI Fields
+  aiScore           Float       @default(0)
+  aiNotes           String?
+  predictedConversion Float     @default(0)
+  suggestedFollowUp  String?
+  bestTimeToCall     String?
+  
+  // Lead Details
+  requirements      String?
+  budget            String?
+  expectedTimeline  String?
+  competitorInfo    String?
+  
+  // Relations
+  meetings          Meeting[]   @relation("LeadMeetings")
+  tasks             Task[]      @relation("LeadTasks")
+  activities        Activity[]  @relation("LeadActivities")
+  quotations        Quotation[] @relation("LeadQuotations")
+  reminders         Reminder[]  @relation("LeadReminders")
+  documents         Document[]  @relation("LeadDocuments")
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  lastContactedAt   DateTime?
+  nextFollowUpDate  DateTime?
+  
+  @@index([status])
+  @@index([temperature])
+  @@index([assignedToId])
+  @@index([companyId])
+}
+
+enum LeadStatus {
+  NEW_LEAD
+  VERIFIED
+  CALLING_PENDING
+  FIRST_CALL_DONE
+  FOLLOW_UP
+  MEETING_SCHEDULED
+  MEETING_1_DONE
+  MEETING_2_DONE
+  MEETING_3_DONE
+  REQUIREMENT_RECEIVED
+  QUOTATION_SENT
+  NEGOTIATION
+  TRIAL_LOAD
+  CONVERTED
+  LOST
+  HOLD
+}
+
+enum Temperature {
+  HOT
+  WARM
+  COLD
+}
+
+// Meetings
+model Meeting {
+  id                String      @id @default(cuid())
+  leadId            String
+  lead              Lead        @relation("LeadMeetings", fields: [leadId], references: [id], onDelete: Cascade)
+  
+  companyId         String
+  company           Company     @relation("CompanyMeetings", fields: [companyId], references: [id], onDelete: Cascade)
+  
+  contactId         String?
+  contact           Contact?    @relation("ContactMeetings", fields: [contactId], references: [id], onDelete: SetNull)
+  
+  createdById       String
+  createdBy         User        @relation("MeetingCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  
+  title             String
+  type              MeetingType @default(VIDEO_CALL)
+  location          String?
+  notes             String?
+  
+  // Documents
+  documentIds       String[]    @default([])
+  
+  // Follow-up
+  nextMeetingDate   DateTime?
+  reminderEnabled   Boolean     @default(true)
+  reminder          Reminder?   @relation("MeetingReminder")
+  
+  // Status
+  status            MeetingStatus @default(SCHEDULED)
+  outcome           String?
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  scheduledAt       DateTime
+  completedAt       DateTime?
+  
+  @@index([leadId])
+  @@index([companyId])
+  @@index([status])
+}
+
+enum MeetingType {
+  IN_PERSON
+  VIDEO_CALL
+  PHONE_CALL
+  SITE_VISIT
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+// Tasks
+model Task {
+  id                String      @id @default(cuid())
+  leadId            String?
+  lead              Lead?       @relation("LeadTasks", fields: [leadId], references: [id], onDelete: SetNull)
+  
+  assignedToId      String
+  assignedTo        User        @relation("TaskAssignedTo", fields: [assignedToId], references: [id], onDelete: Restrict)
+  
+  title             String
+  description       String?
+  priority          Priority    @default(MEDIUM)
+  status            TaskStatus  @default(PENDING)
+  
+  dueDate           DateTime
+  completedAt       DateTime?
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  @@index([leadId])
+  @@index([assignedToId])
+  @@index([status])
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+// Activities / Call Logs
+model Activity {
+  id                String      @id @default(cuid())
+  leadId            String?
+  lead              Lead?       @relation("LeadActivities", fields: [leadId], references: [id], onDelete: SetNull)
+  
+  companyId         String?
+  company           Company?    @relation("CompanyActivities", fields: [companyId], references: [id], onDelete: SetNull)
+  
+  contactId         String?
+  contact           Contact?    @relation("ContactActivities", fields: [contactId], references: [id], onDelete: SetNull)
+  
+  createdById       String
+  createdBy         User        @relation("ActivityCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  
+  type              ActivityType @default(CALL)
+  duration          Int?        // in seconds
+  outcome           String?
+  notes             String?
+  recordingUrl      String?
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  @@index([leadId])
+  @@index([type])
+  @@index([createdById])
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  SMS
+  WHATSAPP
+  MEETING
+  SITE_VISIT
+  NOTE
+}
+
+// Quotations
+model Quotation {
+  id                String      @id @default(cuid())
+  quotationNumber   String      @unique
+  
+  companyId         String
+  company           Company     @relation("CompanyQuotations", fields: [companyId], references: [id], onDelete: Cascade)
+  
+  leadId            String
+  lead              Lead        @relation("LeadQuotations", fields: [leadId], references: [id], onDelete: Cascade)
+  
+  createdById       String
+  createdBy         User        @relation("QuotationCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  
+  title             String
+  description       String?
+  items             QuotationItem[]
+  
+  subtotal          Float       @default(0)
+  tax               Float       @default(0)
+  discount          Float       @default(0)
+  total             Float       @default(0)
+  
+  currency          String      @default("INR")
+  validTill         DateTime?
+  status            QuotationStatus @default(DRAFT)
+  
+  sentAt            DateTime?
+  acceptedAt        DateTime?
+  rejectedAt        DateTime?
+  
+  pdfUrl            String?
+  emailSent         Boolean     @default(false)
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  @@index([leadId])
+  @@index([companyId])
+  @@index([status])
+}
+
+model QuotationItem {
+  id                String      @id @default(cuid())
+  quotationId       String
+  quotation         Quotation   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  
+  description       String
+  quantity          Int
+  unitPrice         Float
+  total             Float
+  
+  @@index([quotationId])
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+// Documents
+model Document {
+  id                String      @id @default(cuid())
+  
+  leadId            String?
+  lead              Lead?       @relation("LeadDocuments", fields: [leadId], references: [id], onDelete: SetNull)
+  
+  companyId         String?
+  company           Company?    @relation("CompanyDocuments", fields: [companyId], references: [id], onDelete: SetNull)
+  
+  uploadedById      String
+  uploadedBy        User        @relation("DocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  
+  fileName          String
+  fileUrl           String
+  fileType          String
+  fileSize          Int
+  
+  documentType      DocumentType
+  description       String?
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  @@index([leadId])
+  @@index([companyId])
+  @@index([documentType])
+}
+
+enum DocumentType {
+  GST_CERTIFICATE
+  PAN_CARD
+  BUSINESS_CARD
+  QUOTATION
+  AGREEMENT
+  INVOICE
+  PROOF_OF_ADDRESS
+  OTHER
+}
+
+// Reminders
+model Reminder {
+  id                String      @id @default(cuid())
+  
+  leadId            String?
+  lead              Lead?       @relation("LeadReminders", fields: [leadId], references: [id], onDelete: Cascade)
+  
+  meetingId         String?     @unique
+  meeting           Meeting?    @relation("MeetingReminder", fields: [meetingId], references: [id], onDelete: Cascade)
+  
+  type              ReminderType
+  title             String
+  description       String?
+  
+  reminderTime      DateTime
+  isCompleted       Boolean     @default(false)
+  
+  channels          ReminderChannel[] @default([])
+  
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  @@index([reminderTime])
+  @@index([isCompleted])
+}
+
+enum ReminderType {
+  FOLLOW_UP
+  MEETING
+  CALL
+  EMAIL
+  TASK
+  QUOTATION
+}
+
+enum ReminderChannel {
+  BROWSER
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+// Notifications
+model Notification {
+  id                String      @id @default(cuid())
+  userId            String
+  user              User        @relation("NotificationFor", fields: [userId], references: [id], onDelete: Cascade)
+  
+  type              NotificationType
+  title             String
+  message           String
+  data              Json?
+  
+  read              Boolean     @default(false)
+  readAt            DateTime?
+  
+  createdAt         DateTime    @default(now())
+  
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  LEAD_ASSIGNED
+  MEETING_REMINDER
+  FOLLOW_UP_DUE
+  QUOTATION_SENT
+  LEAD_CONVERTED
+  LEAD_LOST
+  IMPORT_COMPLETE
+  IMPORT_ERROR
+}
+
+// Field Sales GPS Data
+model FieldSalesGPS {
+  id                String      @id @default(cuid())
+  userId            String
+  
+  checkInTime       DateTime
+  checkInLat        Float
+  checkInLng        Float
+  checkInAddress    String?
+  
+  checkOutTime      DateTime?
+  checkOutLat       Float?
+  checkOutLng       Float?
+  checkOutAddress   String?
+  
+  routeNotes        String?
+  visitCount        Int         @default(0)
+  
+  createdAt         DateTime    @default(now())
+  
+  @@index([userId])
+  @@index([checkInTime])
+}
+
+model FieldSalesVisit {
+  id                String      @id @default(cuid())
+  userId            String
+  leadId            String
+  
+  companyId         String
+  latitude          Float
+  longitude         Float
+  address           String?
+  
+  visitTime         DateTime
+  duration          Int?        // in minutes
+  
+  photoUrls         String[]    @default([])
+  customerSignature String?
+  notes             String?
+  
+  createdAt         DateTime    @default(now())
+  
+  @@index([userId])
+  @@index([leadId])
+}
+
+// Import History
+model ImportHistory {
+  id                String      @id @default(cuid())
+  fileName          String
+  fileSize          Int
+  uploadedBy        String
+  
+  totalRecords      Int
+  successCount      Int
+  failureCount      Int
+  duplicateCount    Int
+  
+  status            ImportStatus @default(IN_PROGRESS)
+  errorReport       String?
+  
+  createdAt         DateTime    @default(now())
+  completedAt       DateTime?
+  
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum ImportStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
+// Audit Logs
+model AuditLog {
+  id                String      @id @default(cuid())
+  userId            String
+  user              User        @relation("AuditLogUser", fields: [userId], references: [id], onDelete: Restrict)
+  
+  action            String
+  entityType        String
+  entityId          String?
+  changes           Json?
+  ipAddress         String?
+  userAgent         String?
+  
+  createdAt         DateTime    @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
