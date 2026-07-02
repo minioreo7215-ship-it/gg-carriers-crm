@@ -1,142 +1,135 @@
-import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import * as bcrypt from 'bcryptjs';
-import * as jwt from 'jsonwebtoken';
-import { z } from 'zod';
+import express from 'express';
+import { registerSchema, loginSchema, updatePasswordSchema } from '../schemas/auth';
+import { validateRequest } from '../middleware/validation';
+import { authenticate } from '../middleware/auth';
+import prisma from '../lib/prisma';
+import { generateToken, verifyToken } from '../lib/jwt';
+import { hashPassword, verifyPassword } from '../lib/hash';
 
-const router = Router();
-const prisma = new PrismaClient();
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-});
-
-const registerSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(2),
-  password: z.string().min(8),
-  phone: z.string().optional(),
-});
-
-// Login
-router.post('/login', async (req: Request, res: Response) => {
-  try {
-    const { email, password } = loginSchema.parse(req.body);
-
-    const user = await prisma.user.findUnique({
-      where: { email },
-    });
-
-    if (!user || !user.password) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-
-    if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    // Update last login
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLogin: new Date() },
-    });
-
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'secret',
-      { expiresIn: process.env.JWT_EXPIRY || '7d' }
-    );
-
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-      },
-    });
-  } catch (error) {
-    res.status(400).json({ message: 'Login failed', error });
-  }
-});
+const router = express.Router();
 
 // Register
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', validateRequest(registerSchema), async (req, res) => {
   try {
-    const { email, name, password, phone } = registerSchema.parse(req.body);
+    const { email, password, firstName, lastName } = req.body;
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    });
-
+    const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-      return res.status(400).json({ message: 'Email already exists' });
+      return res.status(400).json({ error: 'Email already registered' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword = await hashPassword(password);
 
     const user = await prisma.user.create({
       data: {
         email,
-        name,
         password: hashedPassword,
-        phone,
+        firstName,
+        lastName,
+        role: 'USER',
+        status: 'ACTIVE',
       },
     });
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET || 'secret',
-      { expiresIn: process.env.JWT_EXPIRY || '7d' }
-    );
+    const token = generateToken({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    });
 
     res.status(201).json({
-      token,
+      message: 'User registered successfully',
       user: {
         id: user.id,
         email: user.email,
-        name: user.name,
-        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
       },
+      token,
     });
   } catch (error) {
-    res.status(400).json({ message: 'Registration failed', error });
+    res.status(500).json({ error: 'Registration failed', details: error });
+  }
+});
+
+// Login
+router.post('/login', validateRequest(loginSchema), async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const passwordMatch = await verifyPassword(password, user.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (user.status !== 'ACTIVE') {
+      return res.status(403).json({ error: 'Account is not active' });
+    }
+
+    const token = generateToken({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    res.json({
+      message: 'Login successful',
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+      },
+      token,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Login failed' });
   }
 });
 
 // Verify token
-router.post('/verify', async (req: Request, res: Response) => {
+router.post('/verify', authenticate, (req, res) => {
+  res.json({ message: 'Token is valid', user: (req as any).user });
+});
+
+// Refresh token
+router.post('/refresh', authenticate, (req, res) => {
+  const user = (req as any).user;
+  const newToken = generateToken(user);
+  res.json({ token: newToken });
+});
+
+// Update password
+router.post('/update-password', authenticate, validateRequest(updatePasswordSchema), async (req, res) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const userId = (req as any).user.userId;
+    const { currentPassword, newPassword } = req.body;
 
-    if (!token) {
-      return res.status(401).json({ message: 'No token provided' });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
-
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-    });
-
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
-      return res.status(401).json({ message: 'User not found' });
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-      },
+    const passwordMatch = await verifyPassword(currentPassword, user.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const hashedPassword = await hashPassword(newPassword);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
     });
+
+    res.json({ message: 'Password updated successfully' });
   } catch (error) {
-    res.status(401).json({ message: 'Invalid token' });
+    res.status(500).json({ error: 'Failed to update password' });
   }
 });
 

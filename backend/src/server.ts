@@ -1,16 +1,28 @@
 import app from './app';
+import prisma from './lib/prisma';
 
 const PORT = process.env.PORT || 5000;
 
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📝 API Documentation: http://localhost:${PORT}/api/docs`);
-  console.log(`💻 Frontend: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-});
+const startServer = async () => {
+  try {
+    // Test database connection
+    await prisma.$connect();
+    console.log('✓ Database connected');
 
-process.on('unhandledRejection', (err: any) => {
-  console.error('Unhandled Rejection:', err);
-  process.exit(1);
-});
+    app.listen(PORT, () => {
+      console.log(`✓ Server running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error('✗ Failed to start server:', error);
+    process.exit(1);
+  }
+};
 
-export default server;
+startServer();
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  await prisma.$disconnect();
+  process.exit(0);
+});

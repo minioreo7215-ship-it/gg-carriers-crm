@@ -1,21 +1,20 @@
-import express, { Express, Request, Response, NextFunction } from 'express';
+import express from 'express';
 import cors from 'cors';
 import 'express-async-errors';
-import { config } from 'dotenv';
+import dotenv from 'dotenv';
 
-config();
-
+import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import authRoutes from './routes/auth';
-import leadsRoutes from './routes/leads';
-import companiesRoutes from './routes/companies';
-import contactsRoutes from './routes/contacts';
-import meetingsRoutes from './routes/meetings';
-import tasksRoutes from './routes/tasks';
-import quotationsRoutes from './routes/quotations';
-import analyticsRoutes from './routes/analytics';
-import adminRoutes from './routes/admin';
+import userRoutes from './routes/users';
+import carrierRoutes from './routes/carriers';
+import shipmentRoutes from './routes/shipments';
+import documentRoutes from './routes/documents';
+import reportRoutes from './routes/reports';
+import settingsRoutes from './routes/settings';
 
-const app: Express = express();
+dotenv.config();
+
+const app = express();
 
 // Middleware
 app.use(cors({
@@ -23,37 +22,25 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Health check
-app.get('/health', (req: Request, res: Response) => {
-  res.json({ status: 'Server is running', timestamp: new Date() });
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// API Routes
+// Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/leads', leadsRoutes);
-app.use('/api/companies', companiesRoutes);
-app.use('/api/contacts', contactsRoutes);
-app.use('/api/meetings', meetingsRoutes);
-app.use('/api/tasks', tasksRoutes);
-app.use('/api/quotations', quotationsRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/carriers', carrierRoutes);
+app.use('/api/shipments', shipmentRoutes);
+app.use('/api/documents', documentRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/settings', settingsRoutes);
 
-// 404 handler
-app.use((req: Request, res: Response) => {
-  res.status(404).json({ message: 'Route not found' });
-});
-
-// Error handler
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('Error:', err);
-  res.status(err.status || 500).json({
-    message: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { error: err }),
-  });
-});
+// Error handling
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 export default app;
